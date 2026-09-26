@@ -14,7 +14,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<LoginPage mode="login" />} />
+        <Route path="/signup" element={<LoginPage mode="signup" />} />
         <Route
           path="/boards"
           element={
