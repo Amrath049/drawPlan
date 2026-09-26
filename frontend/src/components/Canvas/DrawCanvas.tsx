@@ -231,29 +231,84 @@ export default function DrawCanvas() {
     return sorted.find((el) => isPointInElement(x, y, el)) ?? null;
   };
 
-  const getHandleAt = (x: number, y: number, el: DrawElement): string | null => {
+  // ── Touch & Pointer Tracking for multi-touch (pinch-zoom & two-finger pan) ──
+  const activePointers = useRef<Map<number, { clientX: number; clientY: number }>>(new Map());
+  const pinchState = useRef<{
+    initialDistance: number;
+    initialScale: number;
+    initialMidX: number;
+    initialMidY: number;
+    initialVx: number;
+    initialVy: number;
+  } | null>(null);
+
+  const getHandleAt = (x: number, y: number, el: DrawElement, hitRadius: number = HANDLE_HIT): string | null => {
     // Line / Arrow: endpoints are the interactive handles
     if ((el.type === 'line' || el.type === 'arrow') && el.points && el.points.length >= 2) {
       const p1 = el.points[0];
       const p2 = el.points[el.points.length - 1];
-      if (Math.hypot(x - p1[0], y - p1[1]) <= HANDLE_HIT) return 'start';
-      if (Math.hypot(x - p2[0], y - p2[1]) <= HANDLE_HIT) return 'end';
+      if (Math.hypot(x - p1[0], y - p1[1]) <= hitRadius) return 'start';
+      if (Math.hypot(x - p2[0], y - p2[1]) <= hitRadius) return 'end';
       return null;
     }
     for (const h of getResizeHandles(el)) {
-      if (Math.abs(x - h.x) <= HANDLE_HIT && Math.abs(y - h.y) <= HANDLE_HIT) {
+      if (Math.abs(x - h.x) <= hitRadius && Math.abs(y - h.y) <= hitRadius) {
         return h.position;
       }
     }
     return null;
   };
 
-  // ── Mouse events ───────────────────────────────────────────────────
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // ── Pointer events (Mouse, Pen, Touch) ──────────────────────────────
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      activePointers.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+      // Capture pointer so move/up continue even if finger/cursor leaves canvas
+      try {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {}
+
+      // Multi-touch gesture (Pinch-to-zoom and two-finger pan)
+      if (activePointers.current.size === 2) {
+        // Cancel single-pointer drawing, dragging, resizing, or selecting
+        if (drawing.current.isDrawing) {
+          drawing.current = { isDrawing: false, startX: 0, startY: 0, activeEl: null };
+          forceRender((n) => n + 1);
+        }
+        if (dragging.current.isDragging) {
+          dragging.current = { isDragging: false, startX: 0, startY: 0, origPositions: new Map() };
+        }
+        if (resizing.current.isResizing) {
+          resizing.current = { isResizing: false, handle: '', startX: 0, startY: 0, origEl: null };
+        }
+        if (selecting.current.isSelecting) {
+          selecting.current = { isSelecting: false, startX: 0, startY: 0, rect: null };
+          setSelectionRect(null);
+        }
+
+        const pts = Array.from(activePointers.current.values());
+        const dist = Math.hypot(pts[0].clientX - pts[1].clientX, pts[0].clientY - pts[1].clientY);
+        const midX = (pts[0].clientX + pts[1].clientX) / 2;
+        const midY = (pts[0].clientY + pts[1].clientY) / 2;
+        pinchState.current = {
+          initialDistance: Math.max(1, dist),
+          initialScale: viewTransform.scale,
+          initialMidX: midX,
+          initialMidY: midY,
+          initialVx: viewTransform.x,
+          initialVy: viewTransform.y,
+        };
+        return;
+      }
+
+      if (activePointers.current.size > 2) return;
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const { x, y } = toCanvas(e.clientX, e.clientY, canvas);
+      const isTouch = e.pointerType === 'touch';
+      const handleHitDist = isTouch ? 18 : HANDLE_HIT;
 
       // Middle mouse, space+drag, or pan tool => pan
       if (e.button === 1 || spaceDown.current || activeTool === 'pan') {
@@ -328,7 +383,7 @@ export default function DrawCanvas() {
         if (selectedIds.length === 1) {
           const selEl = elements.find((el) => el.id === selectedIds[0]);
           if (selEl) {
-            const handle = getHandleAt(x, y, selEl);
+            const handle = getHandleAt(x, y, selEl, handleHitDist);
             if (handle) {
               resizing.current = { isResizing: true, handle, startX: x, startY: y, origEl: { ...selEl } };
               return;
@@ -374,8 +429,42 @@ export default function DrawCanvas() {
     [activeTool, elements, selectedIds, style, viewTransform, toCanvas, deleteElements, pushHistory, setSelectedIds],
   );
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (activePointers.current.has(e.pointerId)) {
+        activePointers.current.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+      }
+
+      // Multi-touch pinch-to-zoom and two-finger pan
+      if (activePointers.current.size >= 2 && pinchState.current) {
+        const pts = Array.from(activePointers.current.values());
+        const dist = Math.hypot(pts[0].clientX - pts[1].clientX, pts[0].clientY - pts[1].clientY);
+        const midX = (pts[0].clientX + pts[1].clientX) / 2;
+        const midY = (pts[0].clientY + pts[1].clientY) / 2;
+
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const centerCanvasX = midX - rect.left;
+        const centerCanvasY = midY - rect.top;
+
+        const scaleRatio = dist / pinchState.current.initialDistance;
+        const newScale = Math.min(5, Math.max(0.1, pinchState.current.initialScale * scaleRatio));
+
+        const initialWorldX = (pinchState.current.initialMidX - rect.left - pinchState.current.initialVx) / pinchState.current.initialScale;
+        const initialWorldY = (pinchState.current.initialMidY - rect.top - pinchState.current.initialVy) / pinchState.current.initialScale;
+
+        const newVx = centerCanvasX - initialWorldX * newScale;
+        const newVy = centerCanvasY - initialWorldY * newScale;
+
+        setViewTransform({
+          scale: newScale,
+          x: newVx,
+          y: newVy,
+        });
+        return;
+      }
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const { x, y } = toCanvas(e.clientX, e.clientY, canvas);
@@ -393,7 +482,7 @@ export default function DrawCanvas() {
       }
 
       // Eraser drag
-      if (activeTool === 'eraser' && e.buttons === 1) {
+      if (activeTool === 'eraser' && (e.buttons === 1 || e.pointerType === 'touch')) {
         const hit = getTopElementAt(x, y);
         if (hit) {
           deleteElements([hit.id]);
@@ -498,73 +587,99 @@ export default function DrawCanvas() {
     [activeTool, viewTransform, toCanvas, setViewTransform, selectedIds, deleteElements],
   );
 
-  const handleMouseUp = useCallback(() => {
-    // End pan
-    if (panning.current.isPanning) {
-      panning.current.isPanning = false;
-      return;
-    }
-
-    // End resize — commit the ref's current state to Zustand
-    if (resizing.current.isResizing) {
-      resizing.current.isResizing = false;
-      pushHistory(elementsRef.current);
-      useDrawStore.getState().setElements(elementsRef.current);
-      return;
-    }
-
-    // End drag — commit the ref's current state to Zustand
-    if (dragging.current.isDragging) {
-      dragging.current.isDragging = false;
-      pushHistory(elementsRef.current);
-      useDrawStore.getState().setElements(elementsRef.current);
-      return;
-    }
-
-    // End drawing
-    if (drawing.current.isDrawing && drawing.current.activeEl) {
-      const el = drawing.current.activeEl;
-      const isValid =
-        el.type === 'freehand'
-          ? (el.points?.length ?? 0) > 2
-          : Math.abs(el.width) > 4 || Math.abs(el.height) > 4;
-
-      if (isValid) {
-        addElement(el);
-        pushHistory([...elements, el]);
+  const handlePointerUp = useCallback(
+    (e?: React.PointerEvent<HTMLCanvasElement>) => {
+      if (e) {
+        activePointers.current.delete(e.pointerId);
+        try {
+          (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        } catch {}
       }
-      drawing.current = { isDrawing: false, startX: 0, startY: 0, activeEl: null };
 
-      // Freehand: always keep pencil active.
-      // Other shapes: auto-switch to Select UNLESS the tool is locked.
-      if (el.type === 'freehand') {
-        setSelectedIds([]);
-        // pencil tool stays active
-      } else if (isToolLocked) {
-        // locked — stay on current tool, clear selection
-        setSelectedIds([]);
-      } else {
-        // normal — switch to select and pre-select new element
-        setActiveTool('select');
-        if (isValid) setSelectedIds([el.id]);
+      // If pinch was active, clean up pinch state without committing single-pointer logic
+      if (pinchState.current) {
+        if (activePointers.current.size < 2) {
+          pinchState.current = null;
+        }
+        return;
       }
-      forceRender((n) => n + 1);
-    }
 
-    // End drag-select
-    if (selecting.current.isSelecting) {
-      const rect = selecting.current.rect;
-      if (rect) {
-        const inRect = elements.filter((el) =>
-          isElementInRect(el, rect.x, rect.y, rect.w, rect.h),
-        );
-        setSelectedIds(inRect.map((e) => e.id));
+      // End pan
+      if (panning.current.isPanning) {
+        panning.current.isPanning = false;
+        return;
       }
-      selecting.current.isSelecting = false;
-      selecting.current.rect = null;
-      setSelectionRect(null);
-    }
-  }, [elements, isToolLocked, addElement, pushHistory, setSelectedIds, setActiveTool]);
+
+      // End resize — commit the ref's current state to Zustand
+      if (resizing.current.isResizing) {
+        resizing.current.isResizing = false;
+        pushHistory(elementsRef.current);
+        useDrawStore.getState().setElements(elementsRef.current);
+        return;
+      }
+
+      // End drag — commit the ref's current state to Zustand
+      if (dragging.current.isDragging) {
+        dragging.current = { isDragging: false, startX: 0, startY: 0, origPositions: new Map() };
+        pushHistory(elementsRef.current);
+        useDrawStore.getState().setElements(elementsRef.current);
+        return;
+      }
+
+      // End drawing
+      if (drawing.current.isDrawing && drawing.current.activeEl) {
+        const el = drawing.current.activeEl;
+        const isValid =
+          el.type === 'freehand'
+            ? (el.points?.length ?? 0) > 2
+            : Math.abs(el.width) > 4 || Math.abs(el.height) > 4;
+
+        if (isValid) {
+          addElement(el);
+          pushHistory([...elements, el]);
+        }
+        drawing.current = { isDrawing: false, startX: 0, startY: 0, activeEl: null };
+
+        // Freehand: always keep pencil active.
+        // Other shapes: auto-switch to Select UNLESS the tool is locked.
+        if (el.type === 'freehand') {
+          setSelectedIds([]);
+          // pencil tool stays active
+        } else if (isToolLocked) {
+          // locked — stay on current tool, clear selection
+          setSelectedIds([]);
+        } else {
+          // normal — switch to select and pre-select new element
+          setActiveTool('select');
+          if (isValid) setSelectedIds([el.id]);
+        }
+        forceRender((n) => n + 1);
+      }
+
+      // End drag-select
+      if (selecting.current.isSelecting) {
+        const rect = selecting.current.rect;
+        if (rect) {
+          const inRect = elements.filter((el) =>
+            isElementInRect(el, rect.x, rect.y, rect.w, rect.h),
+          );
+          setSelectedIds(inRect.map((e) => e.id));
+        }
+        selecting.current.isSelecting = false;
+        selecting.current.rect = null;
+        setSelectionRect(null);
+      }
+    },
+    [elements, isToolLocked, addElement, pushHistory, setSelectedIds, setActiveTool],
+  );
+
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      activePointers.current.delete(e.pointerId);
+      handlePointerUp(e);
+    },
+    [handlePointerUp],
+  );
 
   // Double click on canvas to edit text
   const handleDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -697,11 +812,16 @@ export default function DrawCanvas() {
     <div ref={containerRef} className="canvas-container">
       <canvas
         ref={canvasRef}
-        style={{ cursor: getCursor() }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        style={{ cursor: getCursor(), touchAction: 'none' }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onPointerLeave={(e) => {
+          if (e.pointerType === 'mouse' && e.buttons === 0) {
+            handlePointerUp(e);
+          }
+        }}
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}

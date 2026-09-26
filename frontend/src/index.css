@@ -1357,3 +1357,103 @@ input, textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════════════════════
+   TOUCH SCREEN & MOBILE RESPONSIVE
+   ══════════════════════════════════════════════════════════ */
+
+/* Prevent mobile browser gestures from hijacking the canvas */
+.canvas-container {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.canvas-container canvas {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/* Mobile & Tablet viewports */
+@media (max-width: 768px) {
+  /* Toolbar: position below header row so it doesn't collide with menu & share */
+  .floating-toolbar {
+    top: 52px;
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 3px 5px;
+    gap: 3px;
+  }
+  .floating-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+  .floating-toolbar .toolbar-btn {
+    min-width: 34px;
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+  }
+
+  /* Header elements */
+  .floating-top-left {
+    left: 8px;
+    top: 8px;
+  }
+  .board-title-input {
+    max-width: 105px;
+    font-size: 13px;
+    padding: 4px 8px;
+  }
+  .floating-top-right {
+    right: 8px;
+    top: 8px;
+    gap: 6px;
+  }
+  .save-status-pill {
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+  .share-pill-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .user-avatar-pill {
+    width: 30px;
+    height: 30px;
+    font-size: 12px;
+  }
+
+  /* Style properties panel */
+  .floating-style-panel {
+    top: 104px;
+    left: 8px;
+    width: min(230px, calc(100vw - 16px));
+    max-height: calc(100vh - 160px);
+  }
+
+  /* Bottom zoom dock */
+  .floating-bottom-dock {
+    left: 8px;
+    bottom: 8px;
+  }
+  .floating-panel-toggle {
+    left: 8px;
+    top: 104px;
+  }
+
+  /* Boards list page */
+  .boards-main {
+    padding: 24px 16px;
+  }
+  .boards-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .boards-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
