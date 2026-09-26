@@ -1,0 +1,57 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build outputs ─────────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.next/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Prisma ────────────────────────────────────────────────────────────────────
+backend/prisma/*.db
+backend/prisma/*.db-journal
+backend/prisma/*.sqlite
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+
+# ── Vite / Rollup cache ───────────────────────────────────────────────────────
+.vite/
+.rollup.cache/
+
+# ── TypeScript cache ──────────────────────────────────────────────────────────
+*.tsbuildinfo
+
+# ── Test coverage ─────────────────────────────────────────────────────────────
+coverage/
+
+# ── Misc temp files ───────────────────────────────────────────────────────────
+*.orig
+*.rej
+fix.md
+fixes.md
+test1.jsx
+test1.css
+initialPrompt.md
+drawplan_build_plan.md
